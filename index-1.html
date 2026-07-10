@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Soko Yetu — Notre marché</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+</style>
+</head>
+<body class="bg-[#F7F3EA]">
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+const SUPABASE_URL = "https://ayrfubzsabcjzglfwvhd.supabase.co";
+const SUPABASE_KEY = "sb_publishable_7Mdkd_iXn5RtQ25PYwq43A_1hT2XoCn";
+
+const headers = {
+  apikey: SUPABASE_KEY,
+  Authorization: `Bearer ${SUPABASE_KEY}`,
+  "Content-Type": "application/json",
+};
+
+const VILLES = ["Cotonou", "Porto-Novo", "Parakou", "Abomey-Calavi", "Lomé", "Abidjan", "Dakar"];
+const PAIEMENTS = [
+  { id: "mtn", label: "MTN MoMo" },
+  { id: "moov", label: "Moov Money" },
+  { id: "orange", label: "Orange Money" },
+  { id: "wave", label: "Wave" },
+];
+
+function fcfa(n) {
+  return new Intl.NumberFormat("fr-FR").format(n) + " FCFA";
+}
+
+// Simple inline icons (no external icon library needed)
+const Icon = {
+  Bag: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>,
+  Plus: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>,
+  Minus: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14"/></svg>,
+  X: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m18 6-12 12M6 6l12 12"/></svg>,
+  Store: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 9V6a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3M4 9l1.5 9a1 1 0 0 0 1 .9h11a1 1 0 0 0 1-.9L20 9M4 9h16"/></svg>,
+  Pin: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>,
+  Check: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>,
+  Loader: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={"animate-spin " + (p.className||"")}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>,
+};
+
+function App() {
+  const [view, setView] = useState("boutique");
+  const [produits, setProduits] = useState([]);
+  const [vendeurs, setVendeurs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [cart, setCart] = useState({});
+  const [cartOpen, setCartOpen] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [orderDone, setOrderDone] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const [form, setForm] = useState({
+    client_nom: "",
+    client_telephone: "",
+    ville_livraison: VILLES[0],
+    mode_paiement: PAIEMENTS[0].id,
+  });
+
+  const [newProduit, setNewProduit] = useState({ nom: "", prix: "", stock: "", vendeur_id: "", description: "" });
+  const [newVendeur, setNewVendeur] = useState({ nom: "", telephone: "", ville: "" });
+  const [adminMsg, setAdminMsg] = useState("");
+
+  async function loadData() {
+    setLoading(true);
+    setError("");
+    try {
+      const [pRes, vRes] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/produits?select=*&order=cree_le.desc`, { headers }),
+        fetch(`${SUPABASE_URL}/rest/v1/vendeurs?select=*&order=nom.asc`, { headers }),
+      ]);
+      if (!pRes.ok || !vRes.ok) throw new Error("fail");
+      setProduits(await pRes.json());
+      setVendeurs(await vRes.json());
+    } catch (e) {
+      setError("Impossible de charger les données. Vérifie ta connexion.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadData(); }, []);
+
+  function vendeurNom(id) {
+    const v = vendeurs.find((v) => v.id === id);
+    return v ? v.nom : "Vendeur";
+  }
+
+  function addToCart(id) { setCart((c) => ({ ...c, [id]: (c[id] || 0) + 1 })); }
+  function removeFromCart(id) {
+    setCart((c) => { const n = { ...c }; if (n[id] <= 1) delete n[id]; else n[id] -= 1; return n; });
+  }
+  function clearLine(id) { setCart((c) => { const n = { ...c }; delete n[id]; return n; }); }
+
+  const cartLines = Object.entries(cart).map(([id, qty]) => {
+    const p = produits.find((p) => p.id === id);
+    return p ? { ...p, qty } : null;
+  }).filter(Boolean);
+
+  const total = cartLines.reduce((sum, l) => sum + l.prix * l.qty, 0);
+  const itemCount = Object.values(cart).reduce((a, b) => a + b, 0);
+
+  async function submitOrder(e) {
+    e.preventDefault();
+    if (cartLines.length === 0) return;
+    setSubmitting(true);
+    try {
+      const commandeRes = await fetch(`${SUPABASE_URL}/rest/v1/commandes`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "return=representation" },
+        body: JSON.stringify({
+          client_nom: form.client_nom,
+          client_telephone: form.client_telephone,
+          ville_livraison: form.ville_livraison,
+          mode_paiement: form.mode_paiement,
+          montant_total: total,
+          statut: "en_attente",
+        }),
+      });
+      if (!commandeRes.ok) throw new Error("fail");
+      const [commande] = await commandeRes.json();
+
+      const articles = cartLines.map((l) => ({
+        commande_id: commande.id,
+        produit_id: l.id,
+        quantite: l.qty,
+        prix_unitaire: l.prix,
+      }));
+      const artRes = await fetch(`${SUPABASE_URL}/rest/v1/commande_articles`, {
+        method: "POST", headers, body: JSON.stringify(articles),
+      });
+      if (!artRes.ok) throw new Error("fail");
+
+      setOrderDone(commande);
+      setCart({});
+      setCheckoutOpen(false);
+    } catch (e) {
+      alert("Une erreur est survenue pendant la commande. Réessaie.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitVendeur(e) {
+    e.preventDefault();
+    setAdminMsg("");
+    if (!newVendeur.nom) return;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/vendeurs`, {
+      method: "POST", headers: { ...headers, Prefer: "return=representation" }, body: JSON.stringify(newVendeur),
+    });
+    if (res.ok) {
+      const [v] = await res.json();
+      setVendeurs((vs) => [...vs, v]);
+      setNewVendeur({ nom: "", telephone: "", ville: "" });
+      setAdminMsg("Vendeur ajouté ✓");
+    } else setAdminMsg("Erreur lors de l'ajout du vendeur");
+  }
+
+  async function submitProduit(e) {
+    e.preventDefault();
+    setAdminMsg("");
+    if (!newProduit.nom || !newProduit.prix || !newProduit.vendeur_id) {
+      setAdminMsg("Remplis au moins nom, prix et vendeur");
+      return;
+    }
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/produits`, {
+      method: "POST", headers: { ...headers, Prefer: "return=representation" },
+      body: JSON.stringify({ ...newProduit, prix: Number(newProduit.prix), stock: Number(newProduit.stock) || 0 }),
+    });
+    if (res.ok) {
+      const [p] = await res.json();
+      setProduits((ps) => [p, ...ps]);
+      setNewProduit({ nom: "", prix: "", stock: "", vendeur_id: "", description: "" });
+      setAdminMsg("Produit ajouté ✓");
+    } else setAdminMsg("Erreur lors de l'ajout du produit");
+  }
+
+  return (
+    <div className="min-h-screen bg-[#F7F3EA] text-[#1B2A56]">
+      <header className="sticky top-0 z-20 bg-[#1B2A56] text-[#F7F3EA] shadow-md">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-full bg-[#D4A017] flex items-center justify-center text-[#1B2A56] font-bold text-lg">S</div>
+            <div>
+              <div className="font-bold text-lg leading-none tracking-tight">Soko Yetu</div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-[#D4A017]">notre marché</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setView(view === "boutique" ? "admin" : "boutique")}
+              className="text-xs px-3 py-1.5 rounded-full border border-[#D4A017]/50 text-[#F7F3EA]/80 hover:bg-white/10">
+              {view === "boutique" ? "Vendeur" : "Boutique"}
+            </button>
+            <button onClick={() => setCartOpen(true)} className="relative p-2 rounded-full hover:bg-white/10">
+              <Icon.Bag className="w-[22px] h-[22px]" />
+              {itemCount > 0 && <span className="absolute -top-0.5 -right-0.5 bg-[#D4A017] text-[#1B2A56] text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{itemCount}</span>}
+            </button>
+          </div>
+        </div>
+        <div className="h-1.5 flex">
+          {["#D4A017", "#2F6E4F", "#1B2A56", "#D4A017", "#2F6E4F"].map((c, i) => <div key={i} className="flex-1" style={{ background: c }} />)}
+        </div>
+      </header>
+
+      <main className="max-w-2xl mx-auto px-4 pb-24">
+        {view === "boutique" ? (
+          <>
+            <div className="pt-6 pb-4">
+              <h1 className="text-2xl font-bold">Le marché, sans bouger de chez toi.</h1>
+              <p className="text-sm text-[#1B2A56]/60 mt-1">Achète directement auprès des vendeurs de ta région, paiement Mobile Money.</p>
+            </div>
+
+            {loading && <div className="flex items-center gap-2 text-[#1B2A56]/60 py-10 justify-center"><Icon.Loader className="w-[18px] h-[18px]" /> Chargement du marché…</div>}
+            {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">{error}</div>}
+
+            {!loading && !error && produits.length === 0 && (
+              <div className="text-center py-14 border-2 border-dashed border-[#1B2A56]/15 rounded-2xl">
+                <Icon.Store className="mx-auto mb-3 text-[#1B2A56]/30 w-9 h-9" />
+                <p className="font-semibold">Le marché est encore vide</p>
+                <p className="text-sm text-[#1B2A56]/60 mt-1 px-6">Passe dans l'onglet "Vendeur" pour ajouter ton premier produit.</p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              {produits.map((p) => (
+                <div key={p.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-[#1B2A56]/5">
+                  <div className="aspect-square bg-[#EDE7D8] flex items-center justify-center overflow-hidden">
+                    {p.image_url ? <img src={p.image_url} alt={p.nom} className="w-full h-full object-cover" /> : <Icon.Store className="text-[#1B2A56]/20 w-8 h-8" />}
+                  </div>
+                  <div className="p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-[#2F6E4F] font-semibold flex items-center gap-1">
+                      <Icon.Pin className="w-[10px] h-[10px]" /> {vendeurNom(p.vendeur_id)}
+                    </div>
+                    <div className="font-semibold text-sm mt-0.5 leading-tight">{p.nom}</div>
+                    <div className="text-[#D4A017] font-bold text-sm mt-1">{fcfa(p.prix)}</div>
+                    <button onClick={() => addToCart(p.id)} className="mt-2 w-full bg-[#1B2A56] text-white text-xs font-semibold py-2 rounded-full flex items-center justify-center gap-1 active:scale-95 transition">
+                      <Icon.Plus className="w-[14px] h-[14px]" /> Ajouter
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <AdminView vendeurs={vendeurs} newVendeur={newVendeur} setNewVendeur={setNewVendeur} submitVendeur={submitVendeur}
+            newProduit={newProduit} setNewProduit={setNewProduit} submitProduit={submitProduit} adminMsg={adminMsg} />
+        )}
+      </main>
+
+      {cartOpen && (
+        <div className="fixed inset-0 z-30 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setCartOpen(false)} />
+          <div className="relative bg-[#F7F3EA] w-full rounded-t-3xl p-5 max-h-[80vh] flex flex-col" style={{animation: "slideUp 0.2s ease-out"}}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-lg">Mon panier</h2>
+              <button onClick={() => setCartOpen(false)} className="p-1"><Icon.X className="w-[22px] h-[22px]" /></button>
+            </div>
+            <div className="overflow-y-auto flex-1 space-y-3">
+              {cartLines.length === 0 && <p className="text-sm text-[#1B2A56]/50 text-center py-10">Ton panier est vide</p>}
+              {cartLines.map((l) => (
+                <div key={l.id} className="flex items-center gap-3 bg-white rounded-xl p-2.5">
+                  <div className="w-12 h-12 rounded-lg bg-[#EDE7D8] flex items-center justify-center flex-shrink-0"><Icon.Store className="text-[#1B2A56]/20 w-[18px] h-[18px]" /></div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold truncate">{l.nom}</div>
+                    <div className="text-xs text-[#D4A017] font-bold">{fcfa(l.prix)}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => removeFromCart(l.id)} className="w-6 h-6 rounded-full bg-[#1B2A56]/10 flex items-center justify-center"><Icon.Minus className="w-3 h-3" /></button>
+                    <span className="text-sm w-4 text-center">{l.qty}</span>
+                    <button onClick={() => addToCart(l.id)} className="w-6 h-6 rounded-full bg-[#1B2A56]/10 flex items-center justify-center"><Icon.Plus className="w-3 h-3" /></button>
+                  </div>
+                  <button onClick={() => clearLine(l.id)} className="text-[#1B2A56]/30 p-1"><Icon.X className="w-4 h-4" /></button>
+                </div>
+              ))}
+            </div>
+            {cartLines.length > 0 && (
+              <div className="pt-3 border-t border-[#1B2A56]/10 mt-3">
+                <div className="flex justify-between text-sm font-semibold mb-3"><span>Total</span><span>{fcfa(total)}</span></div>
+                <button onClick={() => { setCartOpen(false); setCheckoutOpen(true); }} className="w-full bg-[#D4A017] text-[#1B2A56] font-bold py-3 rounded-full">Passer la commande</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {checkoutOpen && (
+        <div className="fixed inset-0 z-30 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setCheckoutOpen(false)} />
+          <form onSubmit={submitOrder} className="relative bg-[#F7F3EA] w-full rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-lg">Finaliser la commande</h2>
+              <button type="button" onClick={() => setCheckoutOpen(false)} className="p-1"><Icon.X className="w-[22px] h-[22px]" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-[#1B2A56]/60">Nom complet</label>
+                <input required value={form.client_nom} onChange={(e) => setForm({ ...form, client_nom: e.target.value })}
+                  className="w-full mt-1 rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 bg-white text-sm" placeholder="Ton nom" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[#1B2A56]/60">Téléphone</label>
+                <input required value={form.client_telephone} onChange={(e) => setForm({ ...form, client_telephone: e.target.value })}
+                  className="w-full mt-1 rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 bg-white text-sm" placeholder="+229 ..." />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[#1B2A56]/60">Ville de livraison</label>
+                <select value={form.ville_livraison} onChange={(e) => setForm({ ...form, ville_livraison: e.target.value })}
+                  className="w-full mt-1 rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 bg-white text-sm">
+                  {VILLES.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[#1B2A56]/60 block mb-1.5">Mode de paiement</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {PAIEMENTS.map((m) => (
+                    <button type="button" key={m.id} onClick={() => setForm({ ...form, mode_paiement: m.id })}
+                      className={`text-sm py-2.5 rounded-xl border font-medium ${form.mode_paiement === m.id ? "bg-[#1B2A56] text-white border-[#1B2A56]" : "bg-white border-[#1B2A56]/15 text-[#1B2A56]"}`}>
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="mt-5 pt-4 border-t border-[#1B2A56]/10">
+              <div className="flex justify-between text-sm font-semibold mb-3"><span>Total à payer</span><span>{fcfa(total)}</span></div>
+              <button type="submit" disabled={submitting} className="w-full bg-[#D4A017] text-[#1B2A56] font-bold py-3 rounded-full disabled:opacity-60 flex items-center justify-center gap-2">
+                {submitting && <Icon.Loader className="w-4 h-4" />} Confirmer la commande
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {orderDone && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-6 bg-black/50">
+          <div className="bg-[#F7F3EA] rounded-3xl p-6 max-w-sm w-full text-center">
+            <Icon.Check className="mx-auto text-[#2F6E4F] mb-3 w-12 h-12" />
+            <h2 className="font-bold text-lg">Commande enregistrée !</h2>
+            <p className="text-sm text-[#1B2A56]/60 mt-1">Merci {orderDone.client_nom}. Le vendeur va te contacter au {orderDone.client_telephone} pour confirmer la livraison à {orderDone.ville_livraison}.</p>
+            <button onClick={() => setOrderDone(null)} className="mt-4 w-full bg-[#1B2A56] text-white font-semibold py-2.5 rounded-full">Retour au marché</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminView({ vendeurs, newVendeur, setNewVendeur, submitVendeur, newProduit, setNewProduit, submitProduit, adminMsg }) {
+  return (
+    <div className="pt-6 pb-10 space-y-8">
+      <div>
+        <h2 className="font-bold text-lg mb-1">Espace vendeur</h2>
+        <p className="text-sm text-[#1B2A56]/60">Ajoute ton profil vendeur, puis tes produits.</p>
+      </div>
+      {adminMsg && <div className="bg-[#2F6E4F]/10 text-[#2F6E4F] text-sm rounded-lg p-3">{adminMsg}</div>}
+
+      <form onSubmit={submitVendeur} className="bg-white rounded-2xl p-4 space-y-3">
+        <div className="flex items-center gap-2 font-semibold text-sm"><Icon.Store className="w-4 h-4 text-[#D4A017]" /> Nouveau vendeur</div>
+        <input required placeholder="Nom de la boutique" value={newVendeur.nom} onChange={(e) => setNewVendeur({ ...newVendeur, nom: e.target.value })} className="w-full rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 text-sm" />
+        <input placeholder="Téléphone" value={newVendeur.telephone} onChange={(e) => setNewVendeur({ ...newVendeur, telephone: e.target.value })} className="w-full rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 text-sm" />
+        <input placeholder="Ville" value={newVendeur.ville} onChange={(e) => setNewVendeur({ ...newVendeur, ville: e.target.value })} className="w-full rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 text-sm" />
+        <button className="w-full bg-[#1B2A56] text-white font-semibold py-2.5 rounded-full text-sm">Ajouter le vendeur</button>
+      </form>
+
+      <form onSubmit={submitProduit} className="bg-white rounded-2xl p-4 space-y-3">
+        <div className="flex items-center gap-2 font-semibold text-sm"><Icon.Plus className="w-4 h-4 text-[#D4A017]" /> Nouveau produit</div>
+        <select required value={newProduit.vendeur_id} onChange={(e) => setNewProduit({ ...newProduit, vendeur_id: e.target.value })} className="w-full rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 text-sm">
+          <option value="">Choisir un vendeur</option>
+          {vendeurs.map((v) => <option key={v.id} value={v.id}>{v.nom}</option>)}
+        </select>
+        <input required placeholder="Nom du produit" value={newProduit.nom} onChange={(e) => setNewProduit({ ...newProduit, nom: e.target.value })} className="w-full rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 text-sm" />
+        <textarea placeholder="Description (optionnel)" value={newProduit.description} onChange={(e) => setNewProduit({ ...newProduit, description: e.target.value })} className="w-full rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 text-sm" rows="2" />
+        <div className="flex gap-2">
+          <input required type="number" placeholder="Prix (FCFA)" value={newProduit.prix} onChange={(e) => setNewProduit({ ...newProduit, prix: e.target.value })} className="w-1/2 rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 text-sm" />
+          <input type="number" placeholder="Stock" value={newProduit.stock} onChange={(e) => setNewProduit({ ...newProduit, stock: e.target.value })} className="w-1/2 rounded-xl border border-[#1B2A56]/15 px-3 py-2.5 text-sm" />
+        </div>
+        <button className="w-full bg-[#D4A017] text-[#1B2A56] font-bold py-2.5 rounded-full text-sm">Ajouter le produit</button>
+      </form>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
